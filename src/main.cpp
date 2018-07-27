@@ -8,6 +8,7 @@
 #include "Eigen-3.3/Eigen/Core"
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
+#include "spline.h"
 
 using namespace std;
 
@@ -199,8 +200,19 @@ int main() {
   	map_waypoints_dx.push_back(d_x);
   	map_waypoints_dy.push_back(d_y);
   }
+	//Lane where the car starts
+	int next_lane = -1;
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+	//Change lane signal
+	bool change_lane = false;
+	bool changing_lane = false;
+
+	//Reference velocity in mph
+	double ref_vel = 0;
+	double min_speed = ref_vel;
+	bool too_close = false;
+
+  h.onMessage([&ref_vel, &min_speed, &too_close, &change_lane, &changing_lane, &next_lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -239,9 +251,235 @@ int main() {
 
           	json msgJson;
 
-          	vector<double> next_x_vals;
-          	vector<double> next_y_vals;
+						//Size of what is left from the previous path sent to the simulator
+						int previous_size = previous_path_x.size();
 
+						//find the actual lane
+						int lane = 0;
+						if (car_d > 0 && car_d < 4) lane = 0;
+						else if (car_d > 4 && car_d < 8) lane = 1;
+						else if (car_d > 8 && car_d < 12) lane = 2;
+						
+						if (next_lane == lane){
+							change_lane = false;
+							changing_lane = false;
+						}
+						/*if ((car_d > 4*next_lane+1.8) && (car_d < 4*(next_lane+1)-1.8)){
+							change_lane = false;
+							changing_lane = false;
+						} */
+
+						//Adjust the velocity
+						
+						
+						//if(next_lane == lane || next_lane == -1){
+						for (int i = 0; i < sensor_fusion.size(); i++){
+							//check if there is a car in the same lane
+							float d = sensor_fusion[i][6];
+							if ((d < 4*(lane +1) && d > 4*lane) || ((d < 4*(next_lane +1) && d > 4*next_lane) && next_lane != -1)){
+								double vx = sensor_fusion[i][3];
+								double vy = sensor_fusion[i][4];
+								double speed = sqrt(vx*vx + vy*vy);
+								
+								double check_car_s = sensor_fusion[i][5];
+
+								check_car_s += (double)previous_size * 0.02 * speed/2.24;
+
+								if ((check_car_s > car_s) && ((check_car_s - car_s) < 30) ){
+ 									too_close = true;
+									change_lane = true;
+									i  = sensor_fusion.size();
+									min_speed = speed;
+									//ref_vel = speed*2.24;
+								}else{
+									too_close = false;
+									min_speed = ref_vel;
+								}
+							}	
+						}
+						//}
+
+						 
+						//Change lane if there is a car ahead
+						
+						if (change_lane and !changing_lane){
+							double final_cost = min_speed;
+							for (int check_lane = 0; check_lane <= 2; check_lane++){
+								double cost = 2*ref_vel;
+								if(check_lane != lane){
+								
+								bool safe_lane_change = true;
+								for (int i = 0; i < sensor_fusion.size(); i++){
+									//check if there is a car in the same lane
+									float d = sensor_fusion[i][6];
+									if (d < 4*(check_lane +1) && d > 4*check_lane){
+										double vx = sensor_fusion[i][3];
+										double vy = sensor_fusion[i][4];
+										double speed = sqrt(vx*vx + vy*vy);
+										double check_car_s = sensor_fusion[i][5];
+
+										check_car_s += (double)previous_size * 0.02 * speed/2.24;
+
+										//Check if there is a car at the same level
+										if (abs(check_car_s - car_s) <25){
+											safe_lane_change = false;
+										}
+
+										//Check if there is a car ahead but has a lower velocity
+										if ((check_car_s > car_s) && ((check_car_s - car_s) < 30) && (speed*2.24 <= ref_vel)){
+											safe_lane_change = false;
+										}
+
+										//Check if there is a car coming from behind with a higher velocity
+										if ((check_car_s < car_s) && ((car_s - check_car_s ) < 25) && (speed*2.24 > ref_vel)){
+											safe_lane_change = false;
+										}
+
+										if(safe_lane_change ){
+											cost = speed*2.24;
+										}
+
+									}	
+								}
+								if (safe_lane_change && abs(check_lane - lane)==1){
+									next_lane = check_lane;
+									changing_lane = true;
+									final_cost = cost;
+									check_lane = 3;
+								}								
+							}
+							}
+						}
+						cout<<"\nlane: "<<lane<<" next_lane: "<<next_lane<<" too_close: "<<too_close<<" change_lane: "<<change_lane;
+						if (too_close && ref_vel > min_speed && ref_vel > 30  && !changing_lane){
+							ref_vel  -= 0.24;						
+						}else if(ref_vel < 49.7){
+							ref_vel += 0.24;
+						}
+						
+						//Next path points
+						vector<double> next_x_vals;
+          				vector<double> next_y_vals;
+
+						//Create a list of evenly spaced (30 meters) waypoints (x,y) that we will interpolate in the spline function
+						vector<double> px;
+						vector<double> py;
+
+						//Create car reference coordinates : x, y and yaw
+						double ref_x = car_x;
+						double ref_y = car_y;
+						double ref_yaw = deg2rad(car_yaw);
+
+						//Define two points that make the path tagent to the car
+						double previous_car_x;
+						double previous_car_y;
+
+						//If previous size is almost empty, use the car as a starting reference, else use the previous path's end waypoints
+						if(previous_size < 2 ){
+
+							//Use the two points to make the path tangent to the car
+							previous_car_x = car_x - cos(ref_yaw);
+							previous_car_y = car_y - sin(ref_yaw);
+							
+						}else{
+							//Assign the previous path's end waypoints to the reference coordinates
+							
+							ref_x = previous_path_x[previous_size-1];
+							ref_y = previous_path_y[previous_size-1];
+
+							previous_car_x = previous_path_x[previous_size-2];
+							previous_car_y = previous_path_y[previous_size-2];
+							ref_yaw = atan2(ref_y - previous_car_y, ref_x - previous_car_x);
+							
+						}
+						//Add the coordinates to the spline waypoints
+						px.push_back(previous_car_x);
+						px.push_back(ref_x);
+						py.push_back(previous_car_y);
+						py.push_back(ref_y);
+						
+						//Add 3 evenly spaced waypoints of 30 meters ahead of the car (in Frenet Coordiantes) to the spline waypoints
+						vector<double> next_waypoint_1, next_waypoint_2, next_waypoint_3;
+						vector<double> ref_frenet = getFrenet(ref_x, ref_y, ref_yaw, map_waypoints_x, map_waypoints_y);
+						if(next_lane != -1 && next_lane != lane){
+							
+							next_waypoint_1 = getXY(ref_frenet[0] + 30, 2+4 * next_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_2 = getXY(ref_frenet[0] + 60, 2+4 * next_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_3 = getXY(ref_frenet[0] + 90, 2+4 * next_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+						}else{
+							next_waypoint_1 = getXY(ref_frenet[0] + 15, 2+4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_1 = getXY(ref_frenet[0] + 30, 2+4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_2 = getXY(ref_frenet[0] + 60, 2+4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_3 = getXY(ref_frenet[0] + 90, 2+4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+						}
+						/*if(next_lane != -1){
+							next_waypoint_1 = getXY(car_s + 30, 2+4 * next_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_2 = getXY(car_s + 60, 2+4 * next_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_3 = getXY(car_s + 90, 2+4 * next_lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+						}else{
+							next_waypoint_1 = getXY(car_s + 30, 2+4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_2 = getXY(car_s + 60, 2+4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+							next_waypoint_3 = getXY(car_s + 90, 2+4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+						}*/
+
+						px.push_back(next_waypoint_1[0]);
+						px.push_back(next_waypoint_2[0]);
+						px.push_back(next_waypoint_3[0]);
+
+						py.push_back(next_waypoint_1[1]);
+						py.push_back(next_waypoint_2[1]);
+						py.push_back(next_waypoint_3[1]);
+
+						//Change the coordinates with respect to the car coordiante system so that we can compute the spline
+						for (int i=0; i < px.size(); i++){
+
+							double shift_x = px[i]-ref_x;
+							double shift_y = py[i]-ref_y;
+
+							px[i] = (shift_x)*cos(ref_yaw) + (shift_y)*sin(ref_yaw);
+							py[i] = (shift_y)*cos(ref_yaw) - (shift_x)*sin(ref_yaw);
+
+						}
+
+						//Create a spline
+						tk::spline s;
+
+						//set the points to the spline
+						s.set_points(px, py);
+
+						//Add the previous path points still not reached by the car to the list of the next points that we will send to the simulator
+						
+						for (int i=0; i < previous_size ; i++){					
+							next_x_vals.push_back(previous_path_x[i]);
+							next_y_vals.push_back(previous_path_y[i]);
+						}
+						
+
+						//Calculate the points from the spline that we will insert into the list of the next points taking into account the desired velocity
+						double x_final = 90.0;
+						double y_final = s(x_final);
+						double target_distance = distance(x_final, y_final, 0, 0);
+
+						//Compute the number of waypoints
+						double N = target_distance*2.24/(0.02*ref_vel);
+
+						//Fill the rest of the list of the next waypoints
+						double x_add_on = 0;
+
+						for (int i=1; i<=50-previous_path_x.size(); i++){
+							double x = x_add_on + x_final/N;
+							double y = s(x);
+
+							x_add_on = x;
+
+							//Convert back to map coordinates
+							double tx = x*cos(ref_yaw)-y*sin(ref_yaw)+ref_x;
+							double ty = x*sin(ref_yaw)+y*cos(ref_yaw)+ref_y;
+							
+							next_x_vals.push_back(tx);
+							next_y_vals.push_back(ty);
+
+						}  
 
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
           	msgJson["next_x"] = next_x_vals;
