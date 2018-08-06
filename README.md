@@ -87,54 +87,27 @@ A really helpful resource for doing this project and creating smooth trajectorie
     git checkout e94b6e1
     ```
 
-## Editor Settings
+## Project Rubric Points
 
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
+### Compilation
+No change have been made to the CMakeLists.txt. The code compiles as mentionned in the Basc Build Instructions.
 
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
+### Valid Trajectories
+* The car is able to drive at least 4.32 miles without incident.
+* The car drives according to the speed limit.
+* Max Acceleration and Jerk are not Exceeded.
+* Car does not have collisions.
+* The car stays in its lane, except for the time between changing lanes.
+* The car is able to change lanes when juged necessary.
+[!Screenshot](/images/screenshot_path_planning.jpg)
 
-## Code Style
-
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
-
-## Project Instructions and Rubric
-
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
-
+### Code Description
+The path planner is composed of three main parts:
+#### Prediction
+The prediction code is integrated in the behaviour planning (line 277 & 311). The main role of the prediction is to predict where the cars around the ego car will be in the future.
+#### Behaviour Planning
+The behaviour planning module (line 268 -> 350) is responsible for taking decisions.
+First, it checks if there is a car ahead and will adjust the speed (line 268 -> 292).
+Then, if there is a car ahead, it checks the cars around and takes the decision if it should change lane or not, and to which lane to go (line 294 -> 342).
+#### Trajectory Generation
+The trajectory generation module (line 351 -> 464) generates a smooth trajectory according to the decision of the behaviour planner's decision and to the last 2 waypoints of the previous path. This module uses the spline.h file to generate trajectories instead of manually creating polynomials.
