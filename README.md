@@ -99,7 +99,7 @@ No change have been made to the CMakeLists.txt. The code compiles as mentionned 
 * Car does not have collisions.
 * The car stays in its lane, except for the time between changing lanes.
 * The car is able to change lanes when juged necessary.
-[!Screenshot](/images/screenshot_path_planning.jpg)
+![Screenshot](screenshot_path_planning.jpg)
 
 ### Code Description
 The path planner is composed of three main parts:
