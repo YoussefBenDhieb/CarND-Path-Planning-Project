@@ -279,7 +279,7 @@ int main() {
 					check_car_s += (double)previous_size * 0.02 * speed/2.24;
 
 					if ((check_car_s > car_s) && ((check_car_s - car_s) < 30) ){
-							too_close = true;
+						too_close = true;
 						change_lane = true;
 						i  = sensor_fusion.size();
 						min_speed = speed;

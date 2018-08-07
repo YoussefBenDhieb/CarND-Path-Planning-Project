@@ -107,7 +107,13 @@ The path planner is composed of three main parts:
 The prediction code is integrated in the behaviour planning (line 277 & 311). The main role of the prediction is to predict where the cars around the ego car will be in the future.
 #### Behaviour Planning
 The behaviour planning module (line 268 -> 350) is responsible for taking decisions.
-First, it checks if there is a car ahead and will adjust the speed (line 268 -> 292).
-Then, if there is a car ahead, it checks the cars around and takes the decision if it should change lane or not, and to which lane to go (line 294 -> 342).
+First, it checks if there is a car ahead and will adjust the speed (line 268 -> 292). It loops over the sensor fusion data and checks for cars in the same lane or the in the target lane if we are changing lane. If there is a car ahead, and the distance between it and the ego car is less than 30m, the variables too_close and change_lane (which means we should change lane) are set to true.
+Then (line 294 -> 342), if there is a car ahead (too_close = true & change_lane=true), it loops over the lanes starting (prioritizing) by lane 0 and omitting the current lane. It checks if:
+* There is a car at the same level (within a distance of +/- 25m)
+* There is a car ahead (distance less than 30m) and its velocity is lower than the velocity of the car ahead of us
+* There is car coming from behind with a velocity higher than the velocity of the ego car
+I any of these conditions is true, the variable safe_lane_change will be set to false and the car will not change of lane. Else, it checks if the safe lane is adjacent to the current lane, if true, it sets the next_lane value equal to the safe_lane, sets the variable changing_lane to true (which means we are changing lane, we use is it later so that the car does not decrease its velocity when changing lane) and breaks the loop.
+
 #### Trajectory Generation
 The trajectory generation module (line 351 -> 464) generates a smooth trajectory according to the decision of the behaviour planner's decision and to the last 2 waypoints of the previous path. This module uses the spline.h file to generate trajectories instead of manually creating polynomials.
+It sets three waypoints (30m, 60m and 90m) ahead of the last two point of the previous path. Then, converts the xaypoints to the car's coordinate system, generates a trajectory and convert back the waypoints to the global coordinate system. Also, when generating waypoints, it take into consideration the target distance and compute the number of waypoints to be sent to the simulator accordingly.
